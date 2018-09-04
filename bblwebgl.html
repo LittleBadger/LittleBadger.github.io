@@ -1,0 +1,365 @@
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<title>Bubbles</title>
+
+<script type="text/javascript" src="./webgl-utils.js"></script>
+
+<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+	
+	const int max_num_bubbles = 20;
+	
+	uniform float t;
+	
+	uniform float num_bubbles;
+	
+	uniform float px[max_num_bubbles];
+	uniform float py[max_num_bubbles];
+	
+	uniform float r[max_num_bubbles];
+	uniform float vamp[max_num_bubbles];
+	
+    void main(void) {
+		vec2 pos = gl_FragCoord.xy;
+		
+		float pwf = 0.0;
+		float minpwf1 = 0.0;
+		float minpwf2 = 0.0;
+		
+		for (int i = 0; i < max_num_bubbles; i++) {
+			if ( float(i) > num_bubbles ) break;
+			vec2 d = pos-vec2(px[i],py[i]) + vamp[i]*vec2(sin(dot(pos,vec2(.04,.05))+1043.0/(20.0+r[i])*t),
+															sin(dot(pos,vec2(.02,.03))+1145.0/(30.0+r[i])*t));
+			/*if ( dot(d,d) < 5.0 ) {
+				gl_FragColor = vec4(0.0,0.0,0.0,1.0);
+				return;
+			}*/
+			pwf = (dot(d,d))/r[i]-r[i];
+			if ( pwf < minpwf1 ) {
+				minpwf2 = minpwf1;
+				minpwf1 = pwf;
+			} else if (pwf < minpwf2) {
+				minpwf2 = pwf;
+			}
+		}
+		gl_FragColor = vec4(0.2,0.8,1.0,1.0);
+		if ( minpwf1 < 0.0 ) {
+			float cit = exp(-.2*(minpwf2 - minpwf1));
+			gl_FragColor += vec4(cit,cit,cit,0.0);
+		}
+    }
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+
+    void main(void) {
+        gl_Position = vec4(aVertexPosition, 1.0);
+    }
+</script>
+
+<script type="text/javascript">
+
+    var gl;
+	var shaderProgram;
+    var squareVertexPositionBuffer;
+	
+	var start_time =  new Date().getTime();
+	var last_rend_time = 0;
+	
+	var max_num_bubbles = 20;
+	var num_bubbles = 0;
+	
+	var adj = new Uint8Array(max_num_bubbles*max_num_bubbles);
+	
+	var px = new Float32Array(max_num_bubbles);
+	var py = new Float32Array(max_num_bubbles);
+	var vx = new Float32Array(max_num_bubbles);
+	var vy = new Float32Array(max_num_bubbles);
+	var r = new Float32Array(max_num_bubbles);
+	var vamp = new Float32Array(max_num_bubbles);
+	
+	var make_bubble_mode = false;
+	
+    function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+	
+	
+	// power function. bubble i is the set of points (x,y) such that pwf(x,y,i) < 0  and pwf(x,y,i) < pwf(x,y,j) for all j != i
+	function pwf(x, y, i) {
+		dx = x - px[i]; dy = y - py[i];
+		return (dx*dx+dy*dy)/r[i] - r[i];
+	}
+	
+
+	function physics() {
+		var dt = (new Date().getTime() - last_rend_time)/1000.0;
+		last_rend_time = new Date().getTime();
+		dt = .01;
+	
+		
+		// recompute adjacency matrix on CPU, because webgl does not allow for image store/load :(
+		// this is not strictly correct...it defines bubbles i and j to be adjacent if the midpoint between bubble i and j (with respect to the power function) belongs to i or j.
+		
+		for (i = 0; i < num_bubbles; i++) {
+			for (j = i+1; j < num_bubbles; j++) {
+				dx = px[j] - px[i]; dy = py[j] - py[i]; //this is terrible... I switched i and j :(
+				L = Math.sqrt(dx*dx + dy*dy);
+				r1 = r[i]; r2 = r[j];			
+				
+				if ( L < r[i]+r[j] ) {
+					mid = L/2.0;
+					if ( r1 != r2 ) mid = (L*r1 - Math.sqrt(r1*r2*(L + r1 - r2)*(L - r1 + r2)))/(r1 - r2);
+					
+					mpx = px[i] + mid*dx/L; mpy = py[i] + mid*dy/L;
+				
+					pw = pwf(mpx,mpy,i);
+					
+					tadj = true; 
+				
+					for (k = 0; k < num_bubbles; k++) {
+						if ( i != k &&  j != k ) {
+							if ( (pwf(mpx,mpy,k)-pw)/r[k] < -.4 ) {
+								tadj = false;
+								break;
+							}
+						}
+					}
+					
+					if ( tadj ) { 
+						// if they just became adjacent, add a bit of vibration
+						if ( adj[i*max_num_bubbles+j] == 0 ) {
+							vamp[i] += .1;
+							vamp[j] += .1;
+						}
+						adj[i*max_num_bubbles+j] = 1;
+					}
+				}
+			}
+		}
+		
+		// forces to make bubbles the right distance apart
+		for (i = 0; i < num_bubbles; i++) {
+			for (j = i+1; j < num_bubbles; j++) {
+				if ( adj[i*max_num_bubbles+j] == 1 ) {
+					dx = px[i] - px[j]; dy = py[i] - py[j];
+					dvx = vx[i] - vx[j]; dvy = vy[i] - vy[j];
+					
+					L = Math.sqrt(dx*dx + dy*dy);
+					f = Math.sqrt(r[i]*r[i] + r[j]*r[j] - r[i]*r[j]) - L;
+					
+					if ( f > 0 ) { f *= 100000.0; } 
+					else { f *= 2000.0; }
+					
+					damping = 200*(dvx*dx + dvy*dy)/L;
+					
+					fx = ( f - damping ) * dx / L - 3*dvx;
+					fy = ( f - damping ) * dy / L - 3*dvy;
+					
+					vx[i] += fx/(r[i]*r[i]); vy[i] += fy/(r[i]*r[i]);
+					vx[j] -= fx/(r[j]*r[j]); vy[j] -= fy/(r[j]*r[j]);
+					
+					vamp[i] *= .999;
+					vamp[j] *= .999;
+				}
+			}
+		}
+		
+		// a hack for approximate area conservation. From some experiments with bubbles on the surface of soap water, area conservation (when projected to 2D) does not quite seem realistic. However, when two bubbles collide, increasing the radius produces a more realistic visual. The below formulas are obtained from approximating the exact solution the collision of two bubbles with area conserved.
+		
+		for (i = 0; i < num_bubbles; i++) {
+			for (j = i+1; j < num_bubbles; j++) {
+				if ( adj[i][j] ) {
+					dx = px[i] - px[j]; dy = py[i] - py[j];
+					dvx = vx[i] - vx[j]; dvy = vy[i] - vy[j];
+					L = Math.sqrt(dx*dx + dy*dy);
+					
+					dldt = (dvx*dx + dvy*dy)/L
+					
+					r1 = r[i]; r2 = r[j];
+					temp = -dldt*(Math.sqrt(2*(r1+r2-L))*r1*r2)/(3.14159*Math.pow(r1*r2*(r1 + r2),1.5));
+					dr1dt = r2*r2*temp;
+					dr2dt = r1*r1*temp;
+					
+					r[i] += Math.max(0.0,dt*dr1dt);
+					r[j] += Math.max(0.0,dt*dr2dt);
+				}
+			}
+		}
+		
+		
+		// blow a bubble!
+		if ( make_bubble_mode ) {
+			vx[(num_bubbles-1)] = 0; vy[(num_bubbles-1)] = 0;
+			r[(num_bubbles-1)] += 30*dt;
+		}
+		
+	
+		// move bubbles and damp
+		for (i = 0; i < num_bubbles; i++) {	
+		
+			// some brownian motion?
+			//  just uniform rand, but in a few time steps, it will become gaussian
+			bx = Math.random()*2 - 1;
+			by = Math.random()*2 - 1;
+			
+			vx[i] += 20*bx/(r[i]);
+			vy[i] += 20*by/(r[i]);
+			
+			// this doesn't look good
+			//vamp[i] += .0001*(bx*bx+by*by);
+			
+			px[i] += dt*vx[i];
+			py[i] += dt*vy[i];
+			
+			vamp[i] *= .99996;
+			vx[i] *= .998;
+			vy[i] *= .998;
+		}
+	}
+	
+    function drawScene() {	
+	
+	    var t = (new Date().getTime() - start_time)/1000.0;
+		gl.uniform1f(gl.getUniformLocation(shaderProgram, "t"),t);
+		gl.uniform1f(gl.getUniformLocation(shaderProgram, "num_bubbles"),num_bubbles);
+		gl.uniform1fv(gl.getUniformLocation(shaderProgram, "vamp"), vamp);
+		gl.uniform1fv(gl.getUniformLocation(shaderProgram, "px"), px);
+		gl.uniform1fv(gl.getUniformLocation(shaderProgram, "py"), py);
+		gl.uniform1fv(gl.getUniformLocation(shaderProgram, "r"), r);
+		gl.uniform1fv(gl.getUniformLocation(shaderProgram, "vamp"), vamp);
+		
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);
+    }
+
+    function tick() {
+        requestAnimFrame(tick);
+		physics();
+		physics();
+
+        drawScene();
+    }
+
+
+    function webGLStart() {
+        var canvas = document.getElementById("lesson01-canvas");
+        
+
+		try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) { }
+		
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+        
+
+		var fragmentShader = getShader(gl, "shader-fs");
+        var vertexShader = getShader(gl, "shader-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+				
+		squareVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
+        vertices = [
+             1.0,  1.0,  0.0,
+            -1.0,  1.0,  0.0,
+             1.0, -1.0,  0.0,
+            -1.0, -1.0,  0.0
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        squareVertexPositionBuffer.itemSize = 3;
+        squareVertexPositionBuffer.numItems = 4;
+		
+     
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+		
+		canvas.onmousedown = handleMouseDown;
+		document.onmouseup = handleMouseUp;
+
+        tick();
+    }
+
+	function handleMouseDown(event) {
+		if (num_bubbles < max_num_bubbles) {
+			make_bubble_mode = true;
+			px[num_bubbles] = event.offsetX;
+			py[num_bubbles] = 500-event.offsetY;
+			r[num_bubbles] = 20;
+			num_bubbles++;
+		}
+	}
+
+	function handleMouseUp(event) {
+		make_bubble_mode = false;
+		vx[(num_bubbles-1)] = .10*(event.offsetX - px[(num_bubbles-1)]);
+		vy[(num_bubbles-1)] = .10*((500-event.offsetY) - py[(num_bubbles-1)]);
+		vamp[num_bubbles-1] = r[(num_bubbles-1)]/100.0;
+	}
+
+	
+</script>
+
+
+</head>
+
+
+<body onload="webGLStart();">
+    Click to start blowing a bubble and drag to give bubble some velocity. <br> Be careful that your bubble does not drift off the screen. <br>
+
+    <canvas id="lesson01-canvas" style="border: none;" width="500" height="500"></canvas>
+
+
+</body></html>
