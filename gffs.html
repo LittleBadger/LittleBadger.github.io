@@ -1,0 +1,263 @@
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<title>GFF</title>
+
+<script type="text/javascript" src="./webgl-utils.js"></script>
+<script type="text/javascript" src="./glMatrix-0.9.5.min.js"></script>
+
+<script id="shader-fs2" type="x-shader/x-fragment">
+    precision mediump float;
+	
+	const float size = 500.0;
+	const float pi = 3.14159;
+	
+	float PHI = 1.61803398874989484820459 * 00000.1; // Golden Ratio   
+	float PI  = 3.14159265358979323846264 * 00000.1; // PI
+	float SQ2 = 1.41421356237309504880169 * 10000.0; // Square Root of Two
+	
+	uniform float divs;
+	uniform float seed; 
+
+	float rand( vec2 );
+	
+    void main(void) {
+		gl_FragColor = vec4(0.0,0.0,0.0,1.0);
+		
+		float i = floor(gl_FragCoord.x); float j = floor(gl_FragCoord.y);
+		
+		float il = 0.0; float ih = size-1.0;
+		float jl = 0.0; float jh = size-1.0;	
+		float field = 0.0;
+		bool transpose = false;
+	
+		for (float cont = 0.0; cont < size; cont++) {
+			if ( cont >= divs )
+				break;
+			float M = (ih - il)+1.0; float N = (jh - jl)+1.0;
+			
+			if ( M <= 3.0 || N <= 3.0 ) break;
+		
+			if ( transpose ) {
+				float NA = floor( (N+1.0)/2.0); float NB = N + 1.0 - NA;
+				float jc = jl + NA - 1.0; 
+					float norm = sqrt(2.0/((M-1.0)));
+				for (float k = 1.0; k < size; ++k) {
+					if ( k >= M-1.0 ) break;
+					float act = exp(k*pi / (M-1.0));
+					
+					float qA = exp(-k*pi*(NA-1.0)/(M-1.0));
+					float n2A = -1.0*( 1.0 + qA*qA + qA*qA*qA*qA + qA*qA*qA*qA*qA*qA );
+					
+					float qB = exp(-k*pi*(NB-1.0)/(M-1.0));
+					float n2B = -1.0*( 1.0 + qB*qB + qB*qB*qB*qB + qB*qB*qB*qB*qB*qB );
+
+					
+					float coeff = ((-2.0 + NA + NB)*(6.0*(M-1.0)*(M-1.0) + k*k*(3.0 + 2.0*NA*(-1.0 + NB) - 2.0*NB)*pi*pi))/
+   (6.0*(-1.0 + M)*(-1.0 + M)*(-1.0 + NA)*(-1.0 + NB));
+   
+					float amp = 1.0/sqrt(coeff) * rand(vec2(il+k,jc));
+					
+					if ( abs(j-jc) < .5) { 
+						field += -amp*norm*sin(pi*k*(i-il)/(M-1.0));
+					}
+					else if ( j > jc ) { 
+						field += -amp*norm*sin(pi*k*(i-il)/(M-1.0))*n2B*(exp(k*pi*((j-jc)-2.0*(NB-1.0)) / (M-1.0)) - exp(-k*pi*(j-jc) / (M-1.0)));
+					}
+					else {
+						field += -amp*norm*sin(pi*k*(i-il)/(M-1.0))*n2A*(exp(k*pi*((j-jc)-2.0*(NA-1.0)) / (M-1.0)) - exp(-k*pi*(jc-j) / (M-1.0)));
+					}
+				}
+				
+				if ( abs(j-jc) <= .2 ) { break; }
+				else if ( j > jc ) jl = jc;
+				else jh = jc;
+				
+			} else {
+				float MA = floor ( (M+1.0)/2.0); float MB = M + 1.0 - MA;
+				float ic = il + MA - 1.0; // center
+				float norm = sqrt(2.0/((N-1.0)));
+				for (float k = 1.0; k < size; k++) {
+					if ( k >= N-1.0 ) break;
+				
+					float act = exp(k*pi / (N-1.0));
+					
+					float qA = exp(-k*pi*(MA-1.0)/(N-1.0));
+					float n2A = -1.0*( 1.0 + qA*qA + qA*qA*qA*qA + qA*qA*qA*qA*qA*qA );
+					
+					float qB =exp(-k*pi*(MB-1.0)/(N-1.0));
+					float n2B = -1.0*( 1.0 + qB*qB + qB*qB*qB*qB + qB*qB*qB*qB*qB*qB );
+		
+					float coeff = ((-2.0 + MA + MB)*(6.0*(N-1.0)*(N-1.0) + k*k*(3.0 + 2.0*MA*(-1.0 + MB) - 2.0*MB)*pi*pi))/
+   (6.0*(-1.0 + N)*(-1.0 + N)*(-1.0 + MA)*(-1.0 + MB));
+
+					float amp = 1.0/sqrt(coeff) * (rand(vec2(ic,jl+k)));
+					
+					if ( abs(i-ic) <= .2 ) { 
+						field += -amp*norm*sin(pi*k*(j-jl)/(N-1.0));
+					}
+					else if ( i > ic ) { 
+						field += -amp*norm*sin(pi*k*(j-jl)/(N-1.0))*n2B*(exp(k*pi*((i-ic)-2.0*(MB-1.0)) / (N-1.0)) -  exp(-k*pi*(i-ic)/(N-1.0)));
+					}
+					else {
+						field += -amp*norm*sin(pi*k*(j-jl)/(M-1.0))*n2A*( exp(k*pi*((ic-i)-2.0*(MA-1.0)) / (N-1.0)) -  exp(-k*pi*(ic-i)/(N-1.0)));
+					}
+				}
+				
+				if ( abs(i-ic) <= .2 ) { break; }
+				else if ( i > ic ) il = ic;
+				else ih = ic;
+			}
+			transpose = !transpose;
+		}
+		
+        gl_FragColor = vec4(0.0,.5,.55,1.0)+1.0*field*vec4(0.0,1.0,1.0, 0.0);
+    }
+
+
+	float rand(vec2 co){
+		return 2.0*(fract(tan(distance(co*(seed+PHI), vec2(PHI, PI)))*SQ2)-.5);
+	}
+</script>
+
+
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    void main(void) {
+        gl_Position = vec4(aVertexPosition, 1.0);
+    }
+</script>
+
+<script type="text/javascript">
+	var divs = 20;
+	var rseed = 2343;
+	
+	var fc = 1;
+    var gl;
+	var shaderProgram2;
+    var squareVertexPositionBuffer;
+
+	var start_time =  new Date().getTime();
+	var last_rend_time = 0;
+
+	
+    function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+	
+    function drawScene() {
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.useProgram(shaderProgram2);
+		gl.uniform1f(gl.getUniformLocation(shaderProgram2, "seed"),rseed);
+		gl.uniform1f(gl.getUniformLocation(shaderProgram2, "divs"),divs);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);
+    }
+
+    function webGLStart() {
+        var canvas = document.getElementById("lesson01-canvas");
+       
+		try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) { }
+		
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+       
+		var fragmentShader2 = getShader(gl, "shader-fs2");
+        var vertexShader = getShader(gl, "shader-vs");
+		
+		shaderProgram2 = gl.createProgram();
+        gl.attachShader(shaderProgram2, vertexShader);
+        gl.attachShader(shaderProgram2, fragmentShader2);
+        gl.linkProgram(shaderProgram2);
+
+		if (!gl.getProgramParameter(shaderProgram2, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+		
+		squareVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
+        vertices = [
+             1.0,  1.0,  0.0,
+            -1.0,  1.0,  0.0,
+             1.0, -1.0,  0.0,
+            -1.0, -1.0,  0.0
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        squareVertexPositionBuffer.itemSize = 3;
+        squareVertexPositionBuffer.numItems = 4;
+			
+		gl.useProgram(shaderProgram2);
+		gl.enableVertexAttribArray(gl.getAttribLocation(shaderProgram2, "aVertexPosition"));
+		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram2.vertexPositionAttribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+		gl.uniform1i(gl.getUniformLocation(shaderProgram2, "u_image"), 0);		
+	
+	
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.disable(gl.DEPTH_TEST);
+		rseed = 12*Math.random()
+		canvas.onmousedown = handleMouseDown;
+		drawScene();
+    }
+	
+	function handleMouseDown(event) {
+	
+		if ( divs > 15 ) {
+			divs = 0;
+			rseed = 12*Math.random(); 
+		}
+		divs+=1;
+		//rseed = 12*Math.random()
+		drawScene();
+	
+	}
+	
+</script>
+
+
+</head>
+
+
+<body onload="webGLStart();">
+
+    <canvas id="lesson01-canvas" style="border: none;" width="500" height="500"></canvas>
+
+
+</body></html>
